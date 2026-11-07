@@ -48,8 +48,7 @@ def score(lead: LeadRecord) -> LeadRecord:
 
     # absentee owner: mailing street differs from property street
     if lead.mailing_address and lead.property_address:
-        lead.absentee_owner = (_norm_street(lead.mailing_address) != _norm_street(lead.property_address)
-                               and not lead.homestead)
+        lead.absentee_owner = _norm_street(lead.mailing_address) != _norm_street(lead.property_address)
     if lead.absentee_owner:
         pts += 14; flags.append("Absentee owner")
     lead.out_of_state = bool(lead.mailing_state) and lead.mailing_state != "OH"
@@ -64,8 +63,8 @@ def score(lead: LeadRecord) -> LeadRecord:
     if BUSINESS_RE.search(owner):
         pts -= 6; flags.append("Business owner")
 
-    if lead.rental_registered:
-        pts += 6; flags.append("Registered rental")
+    if lead.foreclosure_flag:
+        pts += 15; flags.append("Foreclosure flag")
     mv = lead.market_value or 0
     if mv >= 1000 and amt:
         ratio = amt / mv
@@ -73,8 +72,12 @@ def score(lead: LeadRecord) -> LeadRecord:
             pts += 8; flags.append(f"Owes {ratio:.0%} of value")
         elif ratio >= 0.05:
             pts += 4
+    if lead.last_sale_date[:4].isdigit():
+        held = dt.date.today().year - int(lead.last_sale_date[:4])
+        if held >= 15:
+            pts += 6; flags.append(f"Owned since {lead.last_sale_date[:4]}")
     code3 = re.sub(r"\D", "", lead.land_use)[:3]
-    if code3 in ("300", "400", "500"):
+    if lead.vacant or code3 in ("300", "400", "500"):
         flags.append("Vacant land")
 
     if lead.on_contract:

@@ -216,29 +216,36 @@ def test_wedge_page_check_and_cache_migration(tmp_path):
     assert set(enrich.load_cache(p)) == {"a", "c"}
 
 
-def test_cagis_gdb(sandbox):
-    np = pytest.importorskip("numpy")
-    pyogrio = pytest.importorskip("pyogrio")
-    cols = {
-        "AUDPTYID": ["0010004008700", "0020002012800", "2180057010600"],
-        "ADDRNO": ["6587", "6313", ""], "ADDRST": ["RIPPLEWOOD", "CAMBRIDGE", "MAIN"], "ADDRSF": ["LN", "AVE", "ST"],
-        "CLASS": ["510", "510", "500"], "MKT_TOTAL_VAL": [250000.0, 30000.0, 15000.0],
-        "HMSD_FLAG": ["Y", "N", "N"], "RENT_REG_FLAG": ["N", "Y", "N"],
-    }
-    gdb = sandbox / "Parcels2026.gdb"
-    pyogrio.raw.write(gdb, geometry=None, field_data=[np.array(v, dtype=object if isinstance(v[0], str) else float)
-                                                      for v in cols.values()],
-                      fields=list(cols), layer="HAM_PARCELS_MERGED_W_CONDOS", driver="OpenFileGDB",
-                      geometry_type=None, crs=None)
+def test_cagis_csv(sandbox):
+    from src.cagis import parse_saldat
+    assert parse_saldat("11567") == "1967-01-15" and parse_saldat("0") == ""
+    hdr = ["BOOK", "PAGE", "PARCEL", "MLTOWN", "PROPTYID", "OWNNM1", "MKTLND", "MKTIMP", "CLASS", "ADDRNO",
+           "ADDRST", "ADDRSF", "SALDAT", "SALAMT", "PARCELID", "UNIT", "FORECL_FLAG", "DELIQ_TAXES", "EXLUCODE"]
+    rows = [
+        ["001", "0004", "0087", "0", "0010004008700", "SCHMIDT", "50000", "200000", "510", "6587", "RIPPLEWOOD",
+         "LN", "60104", "150000", "00100040087", "", "N", "5543.79", "SF"],
+        # PROPTYID blank -> matched via PARCELID + MLTOWN
+        ["002", "0002", "0128", "0", "", "EVANS", "10000", "20000", "510", "6313", "CAMBRIDGE", "AVE",
+         "31599", "40000", "00200020128", "", "Y", "3713.39", "SF"],
+        ["218", "0057", "0106", "0", "2180057010600", "TI", "15000", "0", "500", "0", "MAIN", "ST",
+         "0", "0", "21800570106", "", "N", "", "VA"],
+        ["999", "0001", "0001", "0", "9990001000100", "OTHER", "1", "1", "510", "1", "X", "ST", "0", "0",
+         "99900010001", "", "N", "", "SF"],
+    ]
+    path = sandbox / "Hamilton County Parcels July 2026.csv"
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f); w.writerow(hdr); w.writerows(rows)
     unpaid = make_xlsx(sandbox / "unpaid.xlsx", REAL_UNPAID)
     assert run_pipeline.main(["--local-unpaid", str(unpaid), "--as-of", "2026-10-31", "--no-enrich",
-                              "--cagis-gdb", str(gdb)]) == 0
+                              "--cagis-csv", str(path)]) == 0
     recs = {r["doc_num"]: r for r in json.loads(config.RECORDS_JSON.read_text())["records"]}
     s = recs["001-0004-0087-00"]
-    assert s["property_address"] == "6587 RIPPLEWOOD LN" and s["homestead"] and not s["absentee_owner"]
+    assert s["property_address"] == "6587 RIPPLEWOOD LN" and s["market_value"] == 250000
+    assert not s["absentee_owner"] and s["property_zip"] == "45230" and s["last_sale_date"] == "2004-06-01"
     e = recs["002-0002-0128-00"]
-    assert e["property_address"] == "6313 CAMBRIDGE AVE" and e["absentee_owner"] and e["rental_registered"]
-    assert "Registered rental" in e["flags"] and "Owes 12% of value" in e["flags"]
-    assert recs["218-0057-0106-00"]["property_address"] == "MAIN ST"
-    assert "Vacant land" in recs["218-0057-0106-00"]["flags"]
-    assert json.loads(config.STATE_JSON.read_text())["cagis_snapshot"] == "2026-10-31"
+    assert e["property_address"] == "6313 CAMBRIDGE AVE" and e["absentee_owner"] and e["foreclosure_flag"]
+    assert "Foreclosure flag" in e["flags"] and "Owes 12% of value" in e["flags"] and "Owned since 1999" in e["flags"]
+    v = recs["218-0057-0106-00"]
+    assert v["property_address"] == "MAIN ST" and "Vacant land" in v["flags"]
+    st = json.loads(config.STATE_JSON.read_text())
+    assert st["cagis_snapshot"] == "2026-10-31" and st["cagis_file"] == path.name

@@ -33,9 +33,9 @@ ADVERTISED_YEARS_BACK = 4
 WEDGE_URL = "https://wedge.hcauditor.org/view/re/{parcel_digits}/{year}/summary"
 AUDITOR_PARCEL_URL = WEDGE_URL
 
-# Property addresses come from the CAGIS open-data parcel file (one bulk download).
-CAGIS_DOWNLOAD_PAGE = "https://cagismaps.hamilton-co.org/cagisportal/mapdata/download"
-CAGIS_PARCELS_URL = "https://www.cagis.org/Opendata/Auditor/Parcels{year}.gdb.zip"
+# Property addresses come from the CAGIS quarterly open-data parcel CSV (one bulk download).
+# The newest "Hamilton County Parcels <Month> <Year>.csv" in this folder is used.
+CAGIS_FOLDER = "https://cagis.org/Opendata/Quarterly_GIS_Data/"
 
 # Per-parcel Auditor page lookups: OFF. The Auditor site limits parcel views per
 # visitor (then shows a captcha), so bulk lookups there aren't appropriate.

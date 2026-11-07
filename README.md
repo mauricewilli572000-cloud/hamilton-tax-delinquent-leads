@@ -26,12 +26,12 @@ The Forfeited Land Sale PDFs are not used (sale is every other year, next in 202
    - safety stop: if a new file parses to < 30% of the current active leads, it aborts instead of mass-marking leads removed
 6. Scores 0–100 → Hot (55+) / Warm (32+) / Cold. Points for amount owed, advertised-delinquent (more for multiple years), delinquent 3+ years, absentee owner, out-of-state owner, estate/heirs, residential land use; minus for LLC/corporate owners.
 7. **Property address + value.** `unpaid.xlsx` only has the owner's *mailing* address. The
-   property address, market value, homestead flag (owner lives there) and rental-registration
-   flag come from the **CAGIS open-data Auditor parcel file**
-   (`cagis.org/Opendata/Auditor/Parcels{year}.gdb.zip`): one bulk download, matched by parcel number.
-   It runs on each new county snapshot (and once more if it hasn't been applied yet).
-   Data credit: Cincinnati Area Geographic Information System (CAGIS); see their disclaimer at
-   https://cagismaps.hamilton-co.org/cagisportal/mapdata/download.
+   property address, market value (MKTLND + MKTIMP), foreclosure flag, vacant flag and last sale
+   date/amount come from the **CAGIS quarterly parcel CSV** in
+   https://cagis.org/Opendata/Quarterly_GIS_Data/ (newest "Hamilton County Parcels <Month> <Year>.csv",
+   field list in Parcel_DataDictionary.txt). It's one bulk download, applied on each new county
+   snapshot and whenever CAGIS posts a new quarterly file.
+   Data credit: Cincinnati Area Geographic Information System (CAGIS).
    (Per-parcel lookups on the Auditor's property site are switched off: that site limits
    parcel views per visitor.)
 8. Writes `data/ghl_hamilton_tax_delinquent.csv` (GoHighLevel import, active leads only) and `docs/hamilton_tax_delinquent.json` (dashboard).

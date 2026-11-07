@@ -58,13 +58,24 @@ def load_leads() -> dict[str, LeadRecord]:
     return leads
 
 
-def load_cagis(args) -> dict | None:
-    """CAGIS parcel file -> {parcel digits: info}. None if unavailable (run continues)."""
+def load_cagis(args, leads: dict, state: dict, force: bool = False) -> dict | None:
+    """CAGIS parcel CSV -> {parcel digits: info} for our leads. None = skip / unavailable."""
     if args.no_cagis:
         return None
+    wanted = {l.parcel_id.replace("-", "") for l in leads.values() if l.status == "active"}
     try:
-        gdb = Path(args.cagis_gdb) if args.cagis_gdb else cagis.download(config.RAW_DIR)
-        return cagis.read_parcels(gdb)
+        if args.cagis_csv:
+            path, name = Path(args.cagis_csv), Path(args.cagis_csv).name
+        else:
+            url, sess = cagis.latest_name()
+            name = url.rsplit("/", 1)[-1]
+            if not force and state.get("cagis_file") == name and state.get("cagis_snapshot") == state.get("snapshot"):
+                log.info("CAGIS parcel file unchanged (%s) - already applied.", name)
+                return None
+            path = cagis.download(config.RAW_DIR, url, sess)
+        parcels = cagis.read_parcels(path, wanted)
+        state["cagis_file"] = name
+        return parcels
     except Exception as e:
         log.warning("CAGIS parcel file unavailable (%s) - property addresses not updated this run.", e)
         return None
@@ -116,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--no-enrich", action="store_true", help="skip Auditor page lookups")
     ap.add_argument("--no-cagis", action="store_true", help="skip the CAGIS parcel file")
-    ap.add_argument("--cagis-gdb", help="use a local CAGIS .gdb folder instead of downloading")
+    ap.add_argument("--cagis-csv", help="use a local CAGIS parcel CSV instead of downloading")
     ap.add_argument("--local-unpaid", help="use a local unpaid.xlsx instead of downloading")
     ap.add_argument("--local-advertised", nargs="*", default=[], help="local Advertised*.xlsx files (globs ok)")
     ap.add_argument("--as-of", help="snapshot date YYYY-MM-DD (default: date on the Auditor page, else today)")
@@ -141,13 +152,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if manifest["unpaid"]["sha256"] == state.get("unpaid_sha256") and not args.force:
         leads = load_leads()
-        if not args.no_cagis and state.get("cagis_snapshot") != state.get("snapshot"):
-            log.info("unpaid.xlsx unchanged - adding property addresses from the CAGIS parcel file.")
-            parcels = load_cagis(args)
-            if parcels:
-                finish(leads, state.get("snapshot", snapshot), 0, do_enrich, parcels)
-                state["cagis_snapshot"] = state.get("snapshot")
-                config.STATE_JSON.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        parcels = load_cagis(args, leads, state, force=False)
+        if parcels:
+            log.info("unpaid.xlsx unchanged - applying the CAGIS parcel file (new or not yet applied).")
+            finish(leads, state.get("snapshot", snapshot), 0, do_enrich, parcels)
+            state["cagis_snapshot"] = state.get("snapshot")
+            config.STATE_JSON.write_text(json.dumps(state, indent=2), encoding="utf-8")
         elif do_enrich and config.WEDGE_LOOKUPS and enrich.needs_lookup(leads):
             log.info("unpaid.xlsx unchanged - continuing property address lookups only.")
             finish(leads, state.get("snapshot", snapshot), 0, True)
@@ -231,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     log.info("Merge: new=%d removed=%d", added, removed)
 
     # ------------------------------------------------------------ 4. enrich + save
-    parcels = load_cagis(args)
+    parcels = load_cagis(args, leads, state, force=True)
     finish(leads, snapshot, added, do_enrich, parcels)
     if parcels:
         state["cagis_snapshot"] = snapshot
