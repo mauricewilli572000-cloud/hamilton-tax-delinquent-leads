@@ -68,6 +68,8 @@ def export_ghl(path: Path, leads: dict[str, LeadRecord]) -> int:
                 tags.append("absentee")
             if l.foreclosure_flag:
                 tags.append("foreclosure flag")
+            if l.rental_registered:
+                tags.append("rental")
             w.writerow([
                 first, last, l.owner_name.title(), l.owner_name_2.title(), addr, city.title(), state, zipc,
                 l.property_address, l.property_city.title(), l.property_zip, l.lead_type,
@@ -85,7 +87,7 @@ def export_dashboard(path: Path, leads: dict[str, LeadRecord], meta: dict) -> No
     keep = ("doc_num", "owner_name", "owner_name_2", "mailing_address", "mailing_city", "mailing_state",
             "mailing_zip", "property_address", "property_city", "property_zip", "amount_owed",
             "delinquent_amount", "tax_year", "advertised_years", "absentee_owner", "on_contract", "market_value",
-            "foreclosure_flag", "vacant", "last_sale_date", "last_sale_amount", "land_use", "flags", "score",
+            "foreclosure_flag", "homestead", "rental_registered", "vacant", "last_sale_date", "last_sale_amount", "land_use", "flags", "score",
             "tier", "auditor_url", "date_added", "last_seen", "status", "removed_date")
     rows = [
         {k: getattr(l, k) for k in keep}

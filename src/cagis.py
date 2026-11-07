@@ -102,8 +102,16 @@ def _num(v: str) -> float | None:
 
 
 def parse_saldat(v: str) -> str:
-    """CAGIS SALDAT is MDDYY / MMDDYY ('11567' = Jan 15 1967). Returns YYYY-MM-DD or ''."""
-    d = re.sub(r"\D", "", v or "")
+    """SALDAT: '1996/04/16 00:00:00+00' (current CSV) or MDDYY ('11567' = Jan 15 1967). -> YYYY-MM-DD."""
+    v = (v or "").strip()
+    m = re.match(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", v)
+    if m:
+        try:
+            d = dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return d.isoformat() if d.year > 1900 else ""
+        except ValueError:
+            return ""
+    d = re.sub(r"\D", "", v)
     if len(d) not in (5, 6) or int(d) == 0:
         return ""
     d = d.zfill(6)
@@ -115,7 +123,11 @@ def parse_saldat(v: str) -> str:
         return ""
 
 
-MATCH_VERSION = 2   # bump when matching logic changes -> forces re-apply
+TRUE_VALUES = ("Y", "YES", "1", "T", "TRUE")
+FLAG_COLS = ("FORECL_FLAG", "HMSD_FLAG", "RENT_REG_FLAG", "BOR_FLAG", "CNTFLG", "PARSTAT")
+
+
+MATCH_VERSION = 3   # bump when matching logic changes -> forces re-apply
 
 
 def _d(v) -> str:
@@ -161,7 +173,8 @@ def save_sample(path: Path, dest: Path, n: int = 8) -> None:
             reader = csv.DictReader(f)
             cols = [c for c in (reader.fieldnames or [])
                     if c.strip().upper() in ("BOOK", "PAGE", "PARCEL", "MLTOWN", "PROPTYID", "PARCELID", "NAME",
-                                             "ADDRNO", "ADDRST", "ADDRSF", "MKTLND", "MKTIMP", "SALDAT")]
+                                             "ADDRNO", "ADDRST", "ADDRSF", "MKTLND", "MKTIMP", "MKT_TOTAL_VAL",
+                                             "SALDAT", "SALAMT", "FORECL_FLAG", "HMSD_FLAG", "RENT_REG_FLAG")]
             lines = ["columns: " + ", ".join(reader.fieldnames or []), ""]
             for i, row in enumerate(reader):
                 if i >= n:
@@ -185,6 +198,7 @@ def read_parcels(path: Path, wanted: set[str]) -> dict[str, dict]:
             raise RuntimeError(f"CAGIS CSV columns not recognised: {reader.fieldnames[:40]}")
         wanted_base = {w[:11] for w in wanted}
         rows = 0
+        flag_counts: dict[str, dict[str, int]] = {}
         for row in reader:
             rows += 1
             keys = keys_for(row)
@@ -196,16 +210,23 @@ def read_parcels(path: Path, wanted: set[str]) -> dict[str, dict]:
             addr = " ".join(x for x in (no if no not in ("0", "") else "", st, sf) if x)
             if unit and addr:
                 addr += f" UNIT {unit}"
-            land, imp = _num(g("MKTLND")), _num(g("MKTIMP"))
+            land, imp, total = _num(g("MKTLND")), _num(g("MKTIMP")), _num(g("MKT_TOTAL_VAL"))
+            if not total:
+                total = (land or 0) + (imp or 0) if (land or imp) else None
+            for c in FLAG_COLS:
+                flag_counts.setdefault(c, {}).setdefault(g(c), 0)
+                flag_counts[c][g(c)] += 1
             info = {
                 "address": re.sub(r"\s+", " ", addr).upper(),
-                "market_value": (land or 0) + (imp or 0) if (land or imp) else None,
+                "market_value": total,
+                "homestead": g("HMSD_FLAG").upper() in TRUE_VALUES,
+                "rental": g("RENT_REG_FLAG").upper() in TRUE_VALUES,
                 "land_use": g("CLASS"),
                 "exlucode": g("EXLUCODE").upper(),
-                "foreclosure": g("FORECL_FLAG").upper() in ("Y", "YES", "1", "T", "TRUE"),
+                "foreclosure": g("FORECL_FLAG").upper() in TRUE_VALUES,
                 "last_sale_date": parse_saldat(g("SALDAT")),
                 "last_sale_amount": _num(g("SALAMT")),
-                "cagis_delinquent": _num(g("DELIQ_TAXES")),
+                "cagis_delinquent": _num(g("DELQ_TAXES") or g("DELIQ_TAXES")),
             }
             if hit:
                 if hit not in out or (not out[hit]["address"] and info["address"]):
@@ -217,6 +238,15 @@ def read_parcels(path: Path, wanted: set[str]) -> dict[str, dict]:
     for w in wanted - set(out):
         if w[:11] in by_base:
             out[w] = by_base[w[:11]]
+    summary = {c: dict(sorted(v.items(), key=lambda kv: -kv[1])[:8]) for c, v in flag_counts.items()}
+    log.info("CAGIS flag values among matched leads: %s", summary)
+    try:
+        with (config.DATA_DIR / "cagis_sample.txt").open("a", encoding="utf-8") as f:
+            f.write("\n\nflag values among matched leads:\n")
+            for c, v in summary.items():
+                f.write(f"  {c}: {v}\n")
+    except OSError:
+        pass
     log.info("CAGIS CSV: %d rows read, %d of %d leads matched (%d with an address) [match v%d]",
              rows, len(out), len(wanted), sum(1 for v in out.values() if v["address"]), MATCH_VERSION)
     return out
@@ -230,6 +260,8 @@ def apply(leads: dict, parcels: dict[str, dict]) -> int:
             lead.property_address = ""     # came from (possibly wrong) CAGIS match - refilled below
             lead.market_value = None
             lead.foreclosure_flag = False
+            lead.homestead = False
+            lead.rental_registered = False
             lead.vacant = False
             lead.last_sale_date = ""
             lead.last_sale_amount = None
@@ -245,6 +277,8 @@ def apply(leads: dict, parcels: dict[str, dict]) -> int:
             lead.property_source = "cagis"
         lead.market_value = p["market_value"]
         lead.foreclosure_flag = p["foreclosure"]
+        lead.homestead = p.get("homestead", False)
+        lead.rental_registered = p.get("rental", False)
         lead.vacant = p["exlucode"] == "VA"
         lead.last_sale_date = p["last_sale_date"]
         lead.last_sale_amount = p["last_sale_amount"]

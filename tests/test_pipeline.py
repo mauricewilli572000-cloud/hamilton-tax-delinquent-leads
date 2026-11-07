@@ -219,6 +219,7 @@ def test_wedge_page_check_and_cache_migration(tmp_path):
 def test_cagis_csv(sandbox):
     from src.cagis import parse_saldat
     assert parse_saldat("11567") == "1967-01-15" and parse_saldat("0") == ""
+    assert parse_saldat("1996/04/16 00:00:00+00") == "1996-04-16"
     hdr = ["BOOK", "PAGE", "PARCEL", "MLTOWN", "PROPTYID", "OWNNM1", "MKTLND", "MKTIMP", "CLASS", "ADDRNO",
            "ADDRST", "ADDRSF", "SALDAT", "SALAMT", "PARCELID", "UNIT", "FORECL_FLAG", "DELIQ_TAXES", "EXLUCODE"]
     rows = [

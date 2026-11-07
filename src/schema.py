@@ -34,6 +34,8 @@ class LeadRecord:
     on_contract: bool = False        # contract_yn = Y -> on a delinquent payment plan
     market_value: float | None = None   # CAGIS / Auditor market total value
     foreclosure_flag: bool = False   # CAGIS FORECL_FLAG
+    homestead: bool = False          # CAGIS HMSD_FLAG -> owner lives there
+    rental_registered: bool = False  # CAGIS RENT_REG_FLAG -> landlord
     vacant: bool = False             # CAGIS EXLUCODE = VA
     last_sale_date: str = ""         # CAGIS SALDAT
     last_sale_amount: float | None = None
