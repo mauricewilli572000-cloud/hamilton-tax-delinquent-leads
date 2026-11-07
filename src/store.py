@@ -42,7 +42,7 @@ def split_name(owner: str) -> tuple[str, str]:
 
 GHL_COLUMNS = [
     "First Name", "Last Name", "Full Name", "Owner 2", "Address", "City", "State", "Postal Code",
-    "Property Address", "Property City", "Property Zip", "Lead Type", "Amount Owed",
+    "Property Address", "Property City", "Property Zip", "Property Type", "Property Detail", "Lead Type", "Amount Owed",
     "Delinquent Amount", "Market Value", "Last Sale Date", "Score", "Tier", "Parcel", "Advertised Years", "Absentee", "Date Added",
     "Auditor Link", "Tags",
 ]
@@ -62,6 +62,8 @@ def export_ghl(path: Path, leads: dict[str, LeadRecord]) -> int:
             state = l.mailing_state if l.mailing_address else "OH"
             zipc = l.mailing_zip if l.mailing_address else l.property_zip
             tags = ["tax delinquent", "hamilton county", l.tier.lower()]
+            if l.property_category:
+                tags.append(l.property_category.lower())
             if l.advertised_years:
                 tags.append("advertised delinquent")
             if l.absentee_owner:
@@ -72,7 +74,8 @@ def export_ghl(path: Path, leads: dict[str, LeadRecord]) -> int:
                 tags.append("rental")
             w.writerow([
                 first, last, l.owner_name.title(), l.owner_name_2.title(), addr, city.title(), state, zipc,
-                l.property_address, l.property_city.title(), l.property_zip, l.lead_type,
+                l.property_address, l.property_city.title(), l.property_zip, l.property_category,
+                l.property_type, l.lead_type,
                 f"{l.amount_owed:.2f}" if l.amount_owed is not None else "",
                 f"{l.delinquent_amount:.2f}" if l.delinquent_amount is not None else "",
                 f"{l.market_value:.0f}" if l.market_value else "", l.last_sale_date,
@@ -87,7 +90,8 @@ def export_dashboard(path: Path, leads: dict[str, LeadRecord], meta: dict) -> No
     keep = ("doc_num", "owner_name", "owner_name_2", "mailing_address", "mailing_city", "mailing_state",
             "mailing_zip", "property_address", "property_city", "property_zip", "amount_owed",
             "delinquent_amount", "tax_year", "advertised_years", "absentee_owner", "on_contract", "market_value",
-            "foreclosure_flag", "homestead", "rental_registered", "vacant", "last_sale_date", "last_sale_amount", "land_use", "flags", "score",
+            "foreclosure_flag", "homestead", "rental_registered", "vacant", "last_sale_date",
+            "property_category", "property_type", "last_sale_amount", "land_use", "flags", "score",
             "tier", "auditor_url", "date_added", "last_seen", "status", "removed_date")
     rows = [
         {k: getattr(l, k) for k in keep}

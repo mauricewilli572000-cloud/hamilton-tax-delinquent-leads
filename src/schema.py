@@ -31,6 +31,9 @@ class LeadRecord:
     delinquent_amount: float | None = None
     tax_year: str = ""
     land_use: str = ""
+    property_category: str = ""      # Single Family, Multi-Family (2-4), Vacant Land, ... (src/property_type.py)
+    property_type: str = ""          # detailed label, e.g. "Two family dwelling"
+    exlucode: str = ""               # CAGIS existing land use code
     on_contract: bool = False        # contract_yn = Y -> on a delinquent payment plan
     market_value: float | None = None   # CAGIS / Auditor market total value
     foreclosure_flag: bool = False   # CAGIS FORECL_FLAG

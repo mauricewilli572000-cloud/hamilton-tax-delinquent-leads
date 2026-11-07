@@ -127,7 +127,7 @@ TRUE_VALUES = ("Y", "YES", "1", "T", "TRUE")
 FLAG_COLS = ("FORECL_FLAG", "HMSD_FLAG", "RENT_REG_FLAG", "BOR_FLAG", "CNTFLG", "PARSTAT")
 
 
-MATCH_VERSION = 3   # bump when matching logic changes -> forces re-apply
+MATCH_VERSION = 4   # bump when matching logic changes -> forces re-apply
 
 
 def _d(v) -> str:
@@ -194,7 +194,9 @@ def read_parcels(path: Path, wanted: set[str]) -> dict[str, dict]:
         reader = csv.DictReader(f)
         reader.fieldnames = [(h or "").strip().upper() for h in (reader.fieldnames or [])]
         missing = {"ADDRNO", "ADDRST"} - set(reader.fieldnames)
-        if missing or not ({"PROPTYID", "PARCELID", "NAME"} & set(reader.fieldnames)):
+        has_id = ({"PROPTYID", "PARCELID", "NAME"} & set(reader.fieldnames)) or \
+            {"BOOK", "PAGE", "PARCEL"} <= set(reader.fieldnames)
+        if missing or not has_id:
             raise RuntimeError(f"CAGIS CSV columns not recognised: {reader.fieldnames[:40]}")
         wanted_base = {w[:11] for w in wanted}
         rows = 0
@@ -208,8 +210,9 @@ def read_parcels(path: Path, wanted: set[str]) -> dict[str, dict]:
             g = lambda k: (row.get(k) or "").strip()
             no, st, sf, unit = g("ADDRNO"), g("ADDRST"), g("ADDRSF"), g("UNIT")
             addr = " ".join(x for x in (no if no not in ("0", "") else "", st, sf) if x)
-            if unit and addr:
-                addr += f" UNIT {unit}"
+            if unit and addr and unit.upper() not in addr.upper():
+                # UNIT may already read "UNIT 18B" / "#18B" / "APT 2"
+                addr += f" {unit}" if re.match(r"(?i)^(UNIT|APT|STE|SUITE|#)", unit) else f" UNIT {unit}"
             land, imp, total = _num(g("MKTLND")), _num(g("MKTIMP")), _num(g("MKT_TOTAL_VAL"))
             if not total:
                 total = (land or 0) + (imp or 0) if (land or imp) else None
@@ -280,6 +283,7 @@ def apply(leads: dict, parcels: dict[str, dict]) -> int:
         lead.homestead = p.get("homestead", False)
         lead.rental_registered = p.get("rental", False)
         lead.vacant = p["exlucode"] == "VA"
+        lead.exlucode = p["exlucode"]
         lead.last_sale_date = p["last_sale_date"]
         lead.last_sale_amount = p["last_sale_amount"]
         if p["land_use"]:

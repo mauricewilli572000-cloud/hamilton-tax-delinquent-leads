@@ -4,13 +4,13 @@ from __future__ import annotations
 import datetime as dt
 import re
 
+from .property_type import HOUSE_CATEGORIES, classify
 from .schema import LeadRecord
 
 # "(?<!REAL )" so "TI REAL ESTATE SERVICES LLC" is not treated as a deceased owner's estate
 ESTATE_RE = re.compile(r"(?<!REAL )\b(ESTATE|EST OF|HEIRS|DECEASED|DECD|UNKNOWN HEIRS|SURVIVING)\b")
 TRUST_RE = re.compile(r"\b(TRUST|TRUSTEE|TR)\b")
 BUSINESS_RE = re.compile(r"\b(LLC|L L C|INC|CORP|CORPORATION|COMPANY|CO|LTD|LP|LLP|PARTNERSHIP|BANK|ASSOCIATION|ASSN|CHURCH|MINISTRIES)\b")
-RESIDENTIAL_CODES = re.compile(r"^5\d\d$")   # Ohio land-use 500-599 = residential
 
 
 def _norm_street(s: str) -> str:
@@ -79,16 +79,18 @@ def score(lead: LeadRecord) -> LeadRecord:
         held = dt.date.today().year - int(lead.last_sale_date[:4])
         if held >= 15:
             pts += 6; flags.append(f"Owned since {lead.last_sale_date[:4]}")
-    code3 = re.sub(r"\D", "", lead.land_use)[:3]
-    if lead.vacant or code3 in ("300", "400", "500"):
-        flags.append("Vacant land")
+    lead.property_category, lead.property_type = classify(lead.land_use, lead.exlucode)
+    if lead.property_category == "Vacant Land" or lead.vacant:
+        lead.property_category = "Vacant Land"
+        pts -= 12; flags.append("Vacant land")
 
     if lead.on_contract:
         pts -= 8; flags.append("On payment plan")
 
-    code = re.sub(r"\D", "", lead.land_use)[:3]
-    if code and RESIDENTIAL_CODES.match(code):
-        pts += 5; flags.append("Residential")
+    if lead.property_category in HOUSE_CATEGORIES:
+        pts += 6; flags.append(lead.property_category)
+    elif lead.property_category == "Apartments (5+)":
+        pts += 3; flags.append("Apartments")
 
     lead.score = max(0, min(100, pts))
     lead.tier = "Hot" if lead.score >= 55 else "Warm" if lead.score >= 32 else "Cold"

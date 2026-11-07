@@ -247,6 +247,7 @@ def test_cagis_csv(sandbox):
     assert e["property_address"] == "6313 CAMBRIDGE AVE" and e["absentee_owner"] and e["foreclosure_flag"]
     assert "Foreclosure flag" in e["flags"] and "Owes 12% of value" in e["flags"] and "Owned since 1999" in e["flags"]
     v = recs["218-0057-0106-00"]
+    assert v["property_category"] == "Vacant Land" and s["property_category"] == "Single Family"
     assert v["property_address"] == "MAIN ST" and "Vacant land" in v["flags"]
     st = json.loads(config.STATE_JSON.read_text())
     assert st["cagis_snapshot"] == "2026-10-31" and st["cagis_file"] == path.name
@@ -277,3 +278,17 @@ def test_cagis_apply_clears_old_matches():
                                     "last_sale_amount": None, "cagis_delinquent": None}})
     assert bad.property_address == "3029 PERCY AVE" and bad.property_source == "cagis"
     assert adv.property_address == "6313 CAMBRIDGE AVE" and adv.market_value is None
+
+
+def test_property_type_and_unit():
+    from src.property_type import classify
+    assert classify("510") == ("Single Family", "Single family dwelling")
+    assert classify("520")[0] == "Multi-Family (2-4)" and classify("401")[0] == "Apartments (5+)"
+    assert classify("500")[0] == "Vacant Land" and classify("441") == ("Commercial", "Funeral home")
+    assert classify("512")[0] == "Single Family" and classify("", "VA")[0] == "Vacant Land"
+    assert classify("685")[0] == "Exempt/Government"
+    from src.scoring import score
+    from src.schema import LeadRecord
+    house = score(LeadRecord(doc_num="a", land_use="510", amount_owed=5000))
+    lot = score(LeadRecord(doc_num="b", land_use="500", amount_owed=5000))
+    assert house.score > lot.score and "Vacant land" in lot.flags and house.property_type == "Single family dwelling"
