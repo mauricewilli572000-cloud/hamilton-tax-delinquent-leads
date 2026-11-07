@@ -94,7 +94,7 @@ def test_full_pipeline_two_runs(sandbox):
     unpaid = make_xlsx(sandbox / "unpaid.xlsx", UNPAID_A)
     adv = make_xlsx(sandbox / "AdvertisedDelinquentFile2025.xlsx", ADVERTISED)
     assert run_pipeline.main(["--local-unpaid", str(unpaid), "--local-advertised", str(adv),
-                              "--as-of", "2026-10-31", "--no-enrich"]) == 0
+                              "--as-of", "2026-10-31", "--no-enrich", "--no-cagis"]) == 0
 
     data = json.loads(config.RECORDS_JSON.read_text())
     recs = {r["doc_num"]: r for r in data["records"]}
@@ -115,14 +115,14 @@ def test_full_pipeline_two_runs(sandbox):
     rows2 = [r for r in UNPAID_A if not (r and r[0] == "247-0001-0003-00")]
     rows2 = [r if not (r and r[0] == "073-0003-0193-00") else r[:8] + [1500, 1800] for r in rows2]
     unpaid2 = make_xlsx(sandbox / "unpaid2.xlsx", rows2)
-    assert run_pipeline.main(["--local-unpaid", str(unpaid2), "--as-of", "2026-11-30", "--no-enrich"]) == 0
+    assert run_pipeline.main(["--local-unpaid", str(unpaid2), "--as-of", "2026-11-30", "--no-enrich", "--no-cagis"]) == 0
     recs = {r["doc_num"]: r for r in json.loads(config.RECORDS_JSON.read_text())["records"]}
     assert recs["247-0001-0003-00"]["status"] == "removed"
     assert recs["247-0001-0003-00"]["removed_date"] == "2026-11-30"
     assert [h["amount"] for h in recs["073-0003-0193-00"]["amount_history"]] == [1210.0, 1800.0]
 
     # unchanged file -> no-op
-    assert run_pipeline.main(["--local-unpaid", str(unpaid2), "--no-enrich"]) == 0
+    assert run_pipeline.main(["--local-unpaid", str(unpaid2), "--no-enrich", "--no-cagis"]) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +174,7 @@ def test_real_pipeline(sandbox):
         "0010004008700": {"status": "ok", "address": "6587 RIPPLEWOOD LN", "date": "2026-11-06"},
     }))
     assert run_pipeline.main(["--local-unpaid", str(unpaid), "--local-advertised", str(adv),
-                              "--as-of", "2026-10-31", "--no-enrich"]) == 0
+                              "--as-of", "2026-10-31", "--no-enrich", "--no-cagis"]) == 0
     recs = {r["doc_num"]: r for r in json.loads(config.RECORDS_JSON.read_text())["records"]}
     assert "001-0002-0316-00" not in recs                     # $0.91 filtered
     assert len(recs) == 5                                      # all have a mailing address now
@@ -214,3 +214,31 @@ def test_wedge_page_check_and_cache_migration(tmp_path):
         "c": {"status": "none", "address": "", "v": 2},          # v2 none -> kept
     }))
     assert set(enrich.load_cache(p)) == {"a", "c"}
+
+
+def test_cagis_gdb(sandbox):
+    np = pytest.importorskip("numpy")
+    pyogrio = pytest.importorskip("pyogrio")
+    cols = {
+        "AUDPTYID": ["0010004008700", "0020002012800", "2180057010600"],
+        "ADDRNO": ["6587", "6313", ""], "ADDRST": ["RIPPLEWOOD", "CAMBRIDGE", "MAIN"], "ADDRSF": ["LN", "AVE", "ST"],
+        "CLASS": ["510", "510", "500"], "MKT_TOTAL_VAL": [250000.0, 30000.0, 15000.0],
+        "HMSD_FLAG": ["Y", "N", "N"], "RENT_REG_FLAG": ["N", "Y", "N"],
+    }
+    gdb = sandbox / "Parcels2026.gdb"
+    pyogrio.raw.write(gdb, geometry=None, field_data=[np.array(v, dtype=object if isinstance(v[0], str) else float)
+                                                      for v in cols.values()],
+                      fields=list(cols), layer="HAM_PARCELS_MERGED_W_CONDOS", driver="OpenFileGDB",
+                      geometry_type=None, crs=None)
+    unpaid = make_xlsx(sandbox / "unpaid.xlsx", REAL_UNPAID)
+    assert run_pipeline.main(["--local-unpaid", str(unpaid), "--as-of", "2026-10-31", "--no-enrich",
+                              "--cagis-gdb", str(gdb)]) == 0
+    recs = {r["doc_num"]: r for r in json.loads(config.RECORDS_JSON.read_text())["records"]}
+    s = recs["001-0004-0087-00"]
+    assert s["property_address"] == "6587 RIPPLEWOOD LN" and s["homestead"] and not s["absentee_owner"]
+    e = recs["002-0002-0128-00"]
+    assert e["property_address"] == "6313 CAMBRIDGE AVE" and e["absentee_owner"] and e["rental_registered"]
+    assert "Registered rental" in e["flags"] and "Owes 12% of value" in e["flags"]
+    assert recs["218-0057-0106-00"]["property_address"] == "MAIN ST"
+    assert "Vacant land" in recs["218-0057-0106-00"]["flags"]
+    assert json.loads(config.STATE_JSON.read_text())["cagis_snapshot"] == "2026-10-31"

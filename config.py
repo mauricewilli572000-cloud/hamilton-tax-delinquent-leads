@@ -33,10 +33,18 @@ ADVERTISED_YEARS_BACK = 4
 WEDGE_URL = "https://wedge.hcauditor.org/view/re/{parcel_digits}/{year}/summary"
 AUDITOR_PARCEL_URL = WEDGE_URL
 
+# Property addresses come from the CAGIS open-data parcel file (one bulk download).
+CAGIS_DOWNLOAD_PAGE = "https://cagismaps.hamilton-co.org/cagisportal/mapdata/download"
+CAGIS_PARCELS_URL = "https://www.cagis.org/Opendata/Auditor/Parcels{year}.gdb.zip"
+
+# Per-parcel Auditor page lookups: OFF. The Auditor site limits parcel views per
+# visitor (then shows a captcha), so bulk lookups there aren't appropriate.
+WEDGE_LOOKUPS = False
+# (settings below only apply if WEDGE_LOOKUPS is turned on)
 # Property address lookups (unpaid.xlsx has only the owner's MAILING address).
 # Cached forever in data/property_cache.json; each run does up to this many,
 # highest-score leads first, so a big first batch fills in over a few days.
-ENRICH_MAX_PER_RUN = 4000
+ENRICH_MAX_PER_RUN = 300
 ENRICH_TIME_BUDGET_SEC = 35 * 60
 ENRICH_WORKERS = 2
 ENRICH_DELAY = 0.6            # seconds between requests (auto-slows if the site throttles)

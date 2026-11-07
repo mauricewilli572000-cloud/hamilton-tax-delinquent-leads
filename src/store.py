@@ -43,7 +43,7 @@ def split_name(owner: str) -> tuple[str, str]:
 GHL_COLUMNS = [
     "First Name", "Last Name", "Full Name", "Owner 2", "Address", "City", "State", "Postal Code",
     "Property Address", "Property City", "Property Zip", "Lead Type", "Amount Owed",
-    "Delinquent Amount", "Score", "Tier", "Parcel", "Advertised Years", "Absentee", "Date Added",
+    "Delinquent Amount", "Market Value", "Score", "Tier", "Parcel", "Advertised Years", "Absentee", "Date Added",
     "Auditor Link", "Tags",
 ]
 
@@ -66,11 +66,14 @@ def export_ghl(path: Path, leads: dict[str, LeadRecord]) -> int:
                 tags.append("advertised delinquent")
             if l.absentee_owner:
                 tags.append("absentee")
+            if l.rental_registered:
+                tags.append("rental")
             w.writerow([
                 first, last, l.owner_name.title(), l.owner_name_2.title(), addr, city.title(), state, zipc,
                 l.property_address, l.property_city.title(), l.property_zip, l.lead_type,
                 f"{l.amount_owed:.2f}" if l.amount_owed is not None else "",
                 f"{l.delinquent_amount:.2f}" if l.delinquent_amount is not None else "",
+                f"{l.market_value:.0f}" if l.market_value else "",
                 l.score, l.tier, l.parcel_id, " ".join(l.advertised_years),
                 "Yes" if l.absentee_owner else "No", l.date_added, l.auditor_url, ",".join(tags),
             ])
@@ -81,7 +84,8 @@ def export_dashboard(path: Path, leads: dict[str, LeadRecord], meta: dict) -> No
     """Compact JSON for the GitHub Pages dashboard (active leads + recently removed)."""
     keep = ("doc_num", "owner_name", "owner_name_2", "mailing_address", "mailing_city", "mailing_state",
             "mailing_zip", "property_address", "property_city", "property_zip", "amount_owed",
-            "delinquent_amount", "tax_year", "advertised_years", "absentee_owner", "on_contract", "flags", "score",
+            "delinquent_amount", "tax_year", "advertised_years", "absentee_owner", "on_contract", "market_value",
+            "homestead", "rental_registered", "land_use", "flags", "score",
             "tier", "auditor_url", "date_added", "last_seen", "status", "removed_date")
     rows = [
         {k: getattr(l, k) for k in keep}

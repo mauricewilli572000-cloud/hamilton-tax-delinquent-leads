@@ -47,6 +47,8 @@
   <label><input id="abs" type="checkbox"> Absentee</label>
   <label><input id="oos" type="checkbox"> Out of state</label>
   <label><input id="adv" type="checkbox"> Advertised</label>
+  <label><input id="rent" type="checkbox"> Rental</label>
+  <label><input id="hasprop" type="checkbox"> Has property address</label>
   <label><input id="new" type="checkbox"> Added last 30 days</label>
   <button class="primary" id="csv">Download CSV (filtered)</button>
 </div>
@@ -55,7 +57,7 @@
   <thead><tr>
     <th data-k="score">Score</th><th data-k="tier">Tier</th><th data-k="owner_name">Owner</th>
     <th data-k="property_address">Property</th><th data-k="mailing_address">Mailing address</th>
-    <th data-k="amount_owed">Owed</th><th data-k="tax_year">Delq. since</th><th>Flags</th>
+    <th data-k="amount_owed">Owed</th><th data-k="market_value">Value</th><th data-k="tax_year">Delq. since</th><th>Flags</th>
     <th data-k="doc_num">Parcel</th><th data-k="date_added">Added</th>
   </tr></thead>
   <tbody id="rows"></tbody>
@@ -74,7 +76,7 @@ const prop = r => [r.property_address, r.property_city, r.property_zip].filter(B
 
 fetch("hamilton_tax_delinquent.json?v=" + Date.now()).then(r => r.json()).then(d => {
   ALL = d.records; const m = d.meta;
-  $("meta").textContent = `Auditor file as of ${m.snapshot} · updated ${m.generated} · source: hamiltoncountyauditor.org`;
+  $("meta").textContent = `Auditor file as of ${m.snapshot} · updated ${m.generated} · sources: Hamilton County Auditor, CAGIS`;
   const t = [["Active leads", m.active], ["Hot", m.hot], ["Warm", m.warm], ["New this update", m.added_this_run],
              ["Paid / removed", m.removed], ["Total owed (active)", money(ALL.filter(r => r.status === "active").reduce((a, r) => a + (r.amount_owed || 0), 0))]];
   $("tiles").innerHTML = t.map(([l, v]) => `<div class="tile"><b>${typeof v === "number" ? v.toLocaleString() : v}</b><span>${l}</span></div>`).join("");
@@ -87,7 +89,8 @@ function apply() {
   VIEW = ALL.filter(r =>
     (!st || r.status === st) && (!tier || r.tier === tier) && (r.amount_owed || 0) >= min &&
     (!$("abs").checked || r.absentee_owner) && (!$("oos").checked || (r.mailing_state && r.mailing_state !== "OH")) &&
-    (!$("adv").checked || (r.advertised_years || []).length) && (!$("new").checked || r.date_added >= cutoff) &&
+    (!$("adv").checked || (r.advertised_years || []).length) &&
+    (!$("rent").checked || r.rental_registered) && (!$("hasprop").checked || r.property_address) && (!$("new").checked || r.date_added >= cutoff) &&
     (!q || `${r.owner_name} ${r.owner_name_2} ${prop(r)} ${mail(r)} ${r.doc_num}`.toUpperCase().includes(q)));
   VIEW.sort((a, b) => { const x = a[sortK] ?? "", y = b[sortK] ?? ""; return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
   page = 0; render();
@@ -98,7 +101,7 @@ function render() {
     <td class="num">${r.score}</td><td class="tier ${r.tier}">${r.tier}</td>
     <td class="wrapcell">${esc(r.owner_name)}${r.owner_name_2 ? "<br><small>" + esc(r.owner_name_2) + "</small>" : ""}</td>
     <td class="wrapcell">${esc(prop(r))}</td><td class="wrapcell">${esc(mail(r))}</td>
-    <td class="num">${money(r.amount_owed)}</td><td>${esc(r.tax_year)}</td>
+    <td class="num">${money(r.amount_owed)}</td><td class="num">${money(r.market_value)}</td><td>${esc(r.tax_year)}</td>
     <td class="wrapcell">${(r.flags || []).map(f => `<span class="flag">${esc(f)}</span>`).join("")}</td>
     <td><a href="${esc(r.auditor_url)}" target="_blank" rel="noopener">${esc(r.doc_num)}</a></td>
     <td>${esc(r.date_added)}${r.status === "removed" ? "<br><small>removed " + esc(r.removed_date) + "</small>" : ""}</td></tr>`).join("");
@@ -108,7 +111,8 @@ function render() {
 }
 function csv() {
   const cols = ["score","tier","owner_name","owner_name_2","property_address","property_city","property_zip","mailing_address",
-                "mailing_city","mailing_state","mailing_zip","amount_owed","delinquent_amount","tax_year","advertised_years",
+                "mailing_city","mailing_state","mailing_zip","amount_owed","delinquent_amount","market_value","homestead",
+                "rental_registered","tax_year","advertised_years",
                 "absentee_owner","flags","doc_num","date_added","status","auditor_url"];
   const q = v => `"${String(Array.isArray(v) ? v.join("; ") : v ?? "").replace(/"/g, '""')}"`;
   const body = [cols.join(","), ...VIEW.map(r => cols.map(c => q(r[c])).join(","))].join("\n");
@@ -116,9 +120,9 @@ function csv() {
   a.href = URL.createObjectURL(new Blob(["﻿" + body], {type: "text/csv"}));
   a.download = `hamilton_tax_delinquent_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
 }
-["q","tier","status","min","abs","oos","adv","new"].forEach(id => $(id).addEventListener("input", apply));
+["q","tier","status","min","abs","oos","adv","rent","hasprop","new"].forEach(id => $(id).addEventListener("input", apply));
 document.querySelectorAll("th[data-k]").forEach(th => th.addEventListener("click", () => {
-  const k = th.dataset.k; sortDir = sortK === k ? -sortDir : (k === "score" || k === "amount_owed" ? -1 : 1); sortK = k; apply();
+  const k = th.dataset.k; sortDir = sortK === k ? -sortDir : (["score","amount_owed","market_value"].includes(k) ? -1 : 1); sortK = k; apply();
 }));
 $("prev").onclick = () => { page--; render(); }; $("next").onclick = () => { page++; render(); };
 $("csv").onclick = csv;

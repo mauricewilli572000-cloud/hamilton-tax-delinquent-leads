@@ -48,7 +48,8 @@ def score(lead: LeadRecord) -> LeadRecord:
 
     # absentee owner: mailing street differs from property street
     if lead.mailing_address and lead.property_address:
-        lead.absentee_owner = _norm_street(lead.mailing_address) != _norm_street(lead.property_address)
+        lead.absentee_owner = (_norm_street(lead.mailing_address) != _norm_street(lead.property_address)
+                               and not lead.homestead)
     if lead.absentee_owner:
         pts += 14; flags.append("Absentee owner")
     lead.out_of_state = bool(lead.mailing_state) and lead.mailing_state != "OH"
@@ -62,6 +63,19 @@ def score(lead: LeadRecord) -> LeadRecord:
         pts += 4; flags.append("Trust")
     if BUSINESS_RE.search(owner):
         pts -= 6; flags.append("Business owner")
+
+    if lead.rental_registered:
+        pts += 6; flags.append("Registered rental")
+    mv = lead.market_value or 0
+    if mv >= 1000 and amt:
+        ratio = amt / mv
+        if ratio >= 0.10:
+            pts += 8; flags.append(f"Owes {ratio:.0%} of value")
+        elif ratio >= 0.05:
+            pts += 4
+    code3 = re.sub(r"\D", "", lead.land_use)[:3]
+    if code3 in ("300", "400", "500"):
+        flags.append("Vacant land")
 
     if lead.on_contract:
         pts -= 8; flags.append("On payment plan")

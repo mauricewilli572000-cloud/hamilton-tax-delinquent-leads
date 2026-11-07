@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 import config
-from src import downloader, enrich, store
+from src import cagis, downloader, enrich, store
 from src.parser import parse_file
 from src.schema import LeadRecord
 from src.scoring import score
@@ -58,14 +58,28 @@ def load_leads() -> dict[str, LeadRecord]:
     return leads
 
 
-def finish(leads: dict[str, LeadRecord], snapshot: str, added: int, do_enrich: bool) -> dict:
-    """Property lookups, scoring and all outputs. Returns meta."""
+def load_cagis(args) -> dict | None:
+    """CAGIS parcel file -> {parcel digits: info}. None if unavailable (run continues)."""
+    if args.no_cagis:
+        return None
+    try:
+        gdb = Path(args.cagis_gdb) if args.cagis_gdb else cagis.download(config.RAW_DIR)
+        return cagis.read_parcels(gdb)
+    except Exception as e:
+        log.warning("CAGIS parcel file unavailable (%s) - property addresses not updated this run.", e)
+        return None
+
+
+def finish(leads: dict[str, LeadRecord], snapshot: str, added: int, do_enrich: bool,
+           parcels: dict | None = None) -> dict:
+    """Property addresses, scoring and all outputs. Returns meta."""
+    enrich.apply_cache(leads, enrich.load_cache(config.PROPERTY_CACHE_JSON))   # older page lookups
+    if parcels:
+        cagis.apply(leads, parcels)
     for lead in leads.values():
         score(lead)                       # preliminary score -> lookup order
-    if do_enrich:
+    if do_enrich and config.WEDGE_LOOKUPS:
         enrich.enrich(leads, config.PROPERTY_CACHE_JSON)
-    else:
-        enrich.apply_cache(leads, enrich.load_cache(config.PROPERTY_CACHE_JSON))
     for lead in leads.values():
         enrich.fill_property_city_zip(lead)
         score(lead)
@@ -100,7 +114,9 @@ def finish(leads: dict[str, LeadRecord], snapshot: str, added: int, do_enrich: b
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true")
-    ap.add_argument("--no-enrich", action="store_true", help="skip property-address lookups")
+    ap.add_argument("--no-enrich", action="store_true", help="skip Auditor page lookups")
+    ap.add_argument("--no-cagis", action="store_true", help="skip the CAGIS parcel file")
+    ap.add_argument("--cagis-gdb", help="use a local CAGIS .gdb folder instead of downloading")
     ap.add_argument("--local-unpaid", help="use a local unpaid.xlsx instead of downloading")
     ap.add_argument("--local-advertised", nargs="*", default=[], help="local Advertised*.xlsx files (globs ok)")
     ap.add_argument("--as-of", help="snapshot date YYYY-MM-DD (default: date on the Auditor page, else today)")
@@ -125,7 +141,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if manifest["unpaid"]["sha256"] == state.get("unpaid_sha256") and not args.force:
         leads = load_leads()
-        if do_enrich and enrich.needs_lookup(leads):
+        if not args.no_cagis and state.get("cagis_snapshot") != state.get("snapshot"):
+            log.info("unpaid.xlsx unchanged - adding property addresses from the CAGIS parcel file.")
+            parcels = load_cagis(args)
+            if parcels:
+                finish(leads, state.get("snapshot", snapshot), 0, do_enrich, parcels)
+                state["cagis_snapshot"] = state.get("snapshot")
+                config.STATE_JSON.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        elif do_enrich and config.WEDGE_LOOKUPS and enrich.needs_lookup(leads):
             log.info("unpaid.xlsx unchanged - continuing property address lookups only.")
             finish(leads, state.get("snapshot", snapshot), 0, True)
         else:
@@ -208,7 +231,10 @@ def main(argv: list[str] | None = None) -> int:
     log.info("Merge: new=%d removed=%d", added, removed)
 
     # ------------------------------------------------------------ 4. enrich + save
-    finish(leads, snapshot, added, do_enrich)
+    parcels = load_cagis(args)
+    finish(leads, snapshot, added, do_enrich, parcels)
+    if parcels:
+        state["cagis_snapshot"] = snapshot
     state.update({
         "unpaid_sha256": manifest["unpaid"]["sha256"],
         "snapshot": snapshot,
