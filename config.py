@@ -38,8 +38,8 @@ AUDITOR_PARCEL_URL = WEDGE_URL
 # highest-score leads first, so a big first batch fills in over a few days.
 ENRICH_MAX_PER_RUN = 4000
 ENRICH_TIME_BUDGET_SEC = 35 * 60
-ENRICH_WORKERS = 3
-ENRICH_DELAY = 0.25           # seconds between requests submitted
+ENRICH_WORKERS = 2
+ENRICH_DELAY = 0.6            # seconds between requests (auto-slows if the site throttles)
 
 HTTP_HEADERS = {
     "User-Agent": (

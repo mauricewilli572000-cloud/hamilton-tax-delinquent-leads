@@ -68,25 +68,55 @@ def _session() -> requests.Session:
     return s
 
 
+def is_property_page(html: str, digits: str) -> bool:
+    """True only if this is really the parcel's property page (not a throttle/error page)."""
+    text = page_text(html)
+    hyph = f"{digits[0:3]}-{digits[3:7]}-{digits[7:11]}-{digits[11:13]}"
+    return "Parcel ID" in text and (hyph in text or digits in text)
+
+
 def lookup(digits: str, year: int) -> tuple[str, str]:
-    """Return (status, address). status: ok | none | error."""
+    """Return (status, address). status: ok | none (real page, no address) | error (retry later)."""
     url = config.WEDGE_URL.format(parcel_digits=digits, year=year)
     for attempt in range(3):
         try:
             r = _session().get(url, timeout=30)
-            if r.status_code == 200:
+            if r.status_code == 200 and is_property_page(r.text, digits):
                 addr = parse_address(r.text)
+                if not addr:
+                    _save_debug(digits, r.text, "lookup_debug_noaddress.html")
                 return ("ok", addr) if addr else ("none", "")
-            if r.status_code == 404:
-                return "none", ""
+            _save_debug(digits, f"HTTP {r.status_code}\n" + r.text, "lookup_debug_unexpected.html")
         except requests.RequestException:
             pass
-        time.sleep(2 * (attempt + 1))
+        time.sleep(5 * (attempt + 1))
     return "error", ""
 
 
+_debug_saved: set[str] = set()
+
+
+def _save_debug(digits: str, html: str, name: str) -> None:
+    """Keep one example of each odd page type (committed to data/) so it can be inspected."""
+    if name in _debug_saved:
+        return
+    _debug_saved.add(name)
+    try:
+        (config.DATA_DIR / name).write_text(f"<!-- parcel {digits} -->\n" + html[:200000],
+                                                          encoding="utf-8")
+    except OSError:
+        pass
+
+
+CACHE_VERSION = 2
+
+
 def load_cache(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if not path.exists():
+        return {}
+    cache = json.loads(path.read_text(encoding="utf-8"))
+    # v1 cached throttle pages as "none" - forget those so they are retried
+    return {k: v for k, v in cache.items() if v.get("status") == "ok" or v.get("v") == CACHE_VERSION}
 
 
 def save_cache(path: Path, cache: dict) -> None:
@@ -96,6 +126,8 @@ def save_cache(path: Path, cache: dict) -> None:
 def apply_cache(leads: dict, cache: dict) -> None:
     for lead in leads.values():
         c = cache.get(lead.parcel_id.replace("-", ""))
+        if not c and lead.property_lookup == "none":
+            lead.property_lookup = ""          # old v1 "none" -> retry
         if c and c.get("status") in ("ok", "none"):
             lead.property_lookup = c["status"]
             if c.get("address") and not lead.property_address:
@@ -120,7 +152,8 @@ def enrich(leads: dict, cache_path: Path) -> int:
              len(todo), len(needs_lookup(leads)))
     start, done, errors, ok = time.time(), 0, 0, 0
     today = dt.date.today().isoformat()
-    batch = 200
+    batch = 100
+    delay = config.ENRICH_DELAY
     with ThreadPoolExecutor(max_workers=config.ENRICH_WORKERS) as pool:
         for b in range(0, len(todo), batch):
             if time.time() - start > config.ENRICH_TIME_BUDGET_SEC:
@@ -129,7 +162,7 @@ def enrich(leads: dict, cache_path: Path) -> int:
             futures = {}
             for lead in todo[b:b + batch]:
                 futures[pool.submit(lookup, lead.parcel_id.replace("-", ""), year)] = lead
-                time.sleep(config.ENRICH_DELAY)
+                time.sleep(delay)
             b_err = 0
             for fut in as_completed(futures):
                 lead = futures[fut]
@@ -138,16 +171,23 @@ def enrich(leads: dict, cache_path: Path) -> int:
                 if status == "error":
                     errors += 1; b_err += 1
                     continue
-                cache[lead.parcel_id.replace("-", "")] = {"status": status, "address": addr, "date": today}
+                cache[lead.parcel_id.replace("-", "")] = {"status": status, "address": addr, "date": today,
+                                                         "v": CACHE_VERSION}
                 lead.property_lookup = status
                 if addr:
                     lead.property_address = addr
                     ok += 1
             save_cache(cache_path, cache)
-            log.info("  ... %d/%d looked up (%d found, %d errors)", done, len(todo), ok, errors)
+            log.info("  ... %d/%d looked up (%d found, %d errors, delay %.2fs)", done, len(todo), ok, errors, delay)
             if b_err == len(futures):
                 log.warning("A whole batch failed - stopping lookups for this run.")
                 break
+            if b_err > 0.2 * len(futures):          # being throttled -> slow down and cool off
+                delay = min(delay * 2, 5.0)
+                log.info("  throttled (%d/%d errors) - pausing 60s, delay now %.2fs", b_err, len(futures), delay)
+                time.sleep(60)
+            elif b_err == 0 and delay > config.ENRICH_DELAY:
+                delay = max(config.ENRICH_DELAY, delay * 0.8)
     save_cache(cache_path, cache)
     if errors and errors == done:
         log.warning("Every property lookup failed - wedge.hcauditor.org may be blocking this runner.")

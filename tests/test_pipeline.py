@@ -200,3 +200,17 @@ def test_parse_wedge_header():
     doubled = "Parcel ID 247-0001-0003-00 247-0001-0003-00 Address 6436 HAMILTON AVE 6436 HAMILTON AVE Index Order"
     assert parse_address(doubled) == "6436 HAMILTON AVE"
     assert parse_address("<p>nothing here</p>") == ""
+
+
+def test_wedge_page_check_and_cache_migration(tmp_path):
+    from src import enrich
+    real = "<span>Parcel ID</span><span>206-0009-0053-00</span><span>Address</span><span>2280 HARRISON AVE</span><span>Index Order</span>"
+    assert enrich.is_property_page(real, "2060009005300")
+    assert not enrich.is_property_page("<h1>Too many requests</h1>", "2060009005300")
+    p = tmp_path / "cache.json"
+    p.write_text(json.dumps({
+        "a": {"status": "ok", "address": "1 MAIN ST"},          # v1 ok -> kept
+        "b": {"status": "none", "address": ""},                  # v1 none -> dropped (retry)
+        "c": {"status": "none", "address": "", "v": 2},          # v2 none -> kept
+    }))
+    assert set(enrich.load_cache(p)) == {"a", "c"}
