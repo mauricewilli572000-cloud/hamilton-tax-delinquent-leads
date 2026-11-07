@@ -1,0 +1,53 @@
+name: Hamilton Tax Delinquent Leads
+
+on:
+  schedule:
+    # Daily 7:17am Eastern (11:17 UTC). The Auditor updates unpaid.xlsx about
+    # monthly; on days it hasn't changed the run exits in seconds with no commit.
+    - cron: "17 11 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Reprocess even if the Auditor file is unchanged"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hamilton-tax-delinquent
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Run pipeline
+        run: python run_pipeline.py ${{ inputs.force && '--force' || '' }}
+
+      - name: Commit updated leads
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/ docs/hamilton_tax_delinquent.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Hamilton tax delinquent leads: $(date -u +%Y-%m-%d)"
+            git pull --rebase
+            git push
+          fi

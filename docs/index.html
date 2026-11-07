@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hamilton County Tax Delinquent Leads</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --mute:#667085; --line:#e4e7ec;
+          --hot:#d92d20; --warm:#dc6803; --cold:#667085; --acc:#1d4ed8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:18px 24px 6px; }
+  h1 { margin:0; font-size:20px; }
+  .sub { color:var(--mute); font-size:13px; margin-top:2px; }
+  .tiles { display:flex; gap:12px; flex-wrap:wrap; padding:12px 24px; }
+  .tile { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 16px; min-width:130px; }
+  .tile b { display:block; font-size:22px; font-variant-numeric:tabular-nums; }
+  .tile span { color:var(--mute); font-size:12px; }
+  .filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; padding:6px 24px 12px; }
+  .filters input, .filters select, button { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .filters label { display:flex; gap:5px; align-items:center; color:var(--mute); }
+  button { cursor:pointer; } button.primary { background:var(--acc); color:#fff; border-color:var(--acc); }
+  .wrap { padding:0 24px 24px; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  th, td { padding:7px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; white-space:nowrap; }
+  th { background:#f9fafb; font-size:12px; color:var(--mute); cursor:pointer; user-select:none; position:sticky; top:0; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  td.wrapcell { white-space:normal; min-width:180px; }
+  .tier { font-weight:600; } .Hot{color:var(--hot)} .Warm{color:var(--warm)} .Cold{color:var(--cold)}
+  .flag { display:inline-block; font-size:11px; background:#eef2ff; color:#3730a3; border-radius:6px; padding:1px 6px; margin:1px 2px 1px 0; }
+  tr.removed td { opacity:.5; }
+  .pager { display:flex; gap:8px; align-items:center; padding:10px 24px; color:var(--mute); }
+  a { color:var(--acc); text-decoration:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Hamilton County, OH — Tax Delinquent Leads</h1>
+  <div class="sub" id="meta">Loading…</div>
+</header>
+<div class="tiles" id="tiles"></div>
+<div class="filters">
+  <input id="q" type="search" placeholder="Search owner, address, parcel…" size="32">
+  <select id="tier"><option value="">All tiers</option><option>Hot</option><option>Warm</option><option>Cold</option></select>
+  <select id="status"><option value="active">Active</option><option value="removed">Removed (paid)</option><option value="">All</option></select>
+  <label>Min owed $<input id="min" type="number" value="0" step="500" style="width:90px"></label>
+  <label><input id="abs" type="checkbox"> Absentee</label>
+  <label><input id="oos" type="checkbox"> Out of state</label>
+  <label><input id="adv" type="checkbox"> Advertised</label>
+  <label><input id="new" type="checkbox"> Added last 30 days</label>
+  <button class="primary" id="csv">Download CSV (filtered)</button>
+</div>
+<div class="wrap">
+<table>
+  <thead><tr>
+    <th data-k="score">Score</th><th data-k="tier">Tier</th><th data-k="owner_name">Owner</th>
+    <th data-k="property_address">Property</th><th data-k="mailing_address">Mailing address</th>
+    <th data-k="amount_owed">Owed</th><th data-k="tax_year">Delq. since</th><th>Flags</th>
+    <th data-k="doc_num">Parcel</th><th data-k="date_added">Added</th>
+  </tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+</div>
+<div class="pager"><button id="prev">‹ Prev</button><span id="page"></span><button id="next">Next ›</button></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const PAGE = 100;
+let ALL = [], VIEW = [], page = 0, sortK = "score", sortDir = -1;
+const money = v => v == null ? "" : "$" + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const mail = r => [r.mailing_address, [r.mailing_city, r.mailing_state].filter(Boolean).join(", "), r.mailing_zip].filter(Boolean).join(" ");
+const prop = r => [r.property_address, r.property_city, r.property_zip].filter(Boolean).join(" ");
+
+fetch("hamilton_tax_delinquent.json?v=" + Date.now()).then(r => r.json()).then(d => {
+  ALL = d.records; const m = d.meta;
+  $("meta").textContent = `Auditor file as of ${m.snapshot} · updated ${m.generated} · source: hamiltoncountyauditor.org`;
+  const t = [["Active leads", m.active], ["Hot", m.hot], ["Warm", m.warm], ["New this update", m.added_this_run],
+             ["Paid / removed", m.removed], ["Total owed (active)", money(ALL.filter(r => r.status === "active").reduce((a, r) => a + (r.amount_owed || 0), 0))]];
+  $("tiles").innerHTML = t.map(([l, v]) => `<div class="tile"><b>${typeof v === "number" ? v.toLocaleString() : v}</b><span>${l}</span></div>`).join("");
+  apply();
+}).catch(e => { $("meta").textContent = "Could not load data: " + e; });
+
+function apply() {
+  const q = $("q").value.trim().toUpperCase(), tier = $("tier").value, st = $("status").value;
+  const min = +$("min").value || 0, cutoff = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  VIEW = ALL.filter(r =>
+    (!st || r.status === st) && (!tier || r.tier === tier) && (r.amount_owed || 0) >= min &&
+    (!$("abs").checked || r.absentee_owner) && (!$("oos").checked || (r.mailing_state && r.mailing_state !== "OH")) &&
+    (!$("adv").checked || (r.advertised_years || []).length) && (!$("new").checked || r.date_added >= cutoff) &&
+    (!q || `${r.owner_name} ${r.owner_name_2} ${prop(r)} ${mail(r)} ${r.doc_num}`.toUpperCase().includes(q)));
+  VIEW.sort((a, b) => { const x = a[sortK] ?? "", y = b[sortK] ?? ""; return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
+  page = 0; render();
+}
+function render() {
+  const rows = VIEW.slice(page * PAGE, (page + 1) * PAGE);
+  $("rows").innerHTML = rows.map(r => `<tr class="${r.status}">
+    <td class="num">${r.score}</td><td class="tier ${r.tier}">${r.tier}</td>
+    <td class="wrapcell">${esc(r.owner_name)}${r.owner_name_2 ? "<br><small>" + esc(r.owner_name_2) + "</small>" : ""}</td>
+    <td class="wrapcell">${esc(prop(r))}</td><td class="wrapcell">${esc(mail(r))}</td>
+    <td class="num">${money(r.amount_owed)}</td><td>${esc(r.tax_year)}</td>
+    <td class="wrapcell">${(r.flags || []).map(f => `<span class="flag">${esc(f)}</span>`).join("")}</td>
+    <td><a href="${esc(r.auditor_url)}" target="_blank" rel="noopener">${esc(r.doc_num)}</a></td>
+    <td>${esc(r.date_added)}${r.status === "removed" ? "<br><small>removed " + esc(r.removed_date) + "</small>" : ""}</td></tr>`).join("");
+  const pages = Math.max(1, Math.ceil(VIEW.length / PAGE));
+  $("page").textContent = `${VIEW.length.toLocaleString()} leads · page ${page + 1} of ${pages}`;
+  $("prev").disabled = page === 0; $("next").disabled = page >= pages - 1;
+}
+function csv() {
+  const cols = ["score","tier","owner_name","owner_name_2","property_address","property_city","property_zip","mailing_address",
+                "mailing_city","mailing_state","mailing_zip","amount_owed","delinquent_amount","tax_year","advertised_years",
+                "absentee_owner","flags","doc_num","date_added","status","auditor_url"];
+  const q = v => `"${String(Array.isArray(v) ? v.join("; ") : v ?? "").replace(/"/g, '""')}"`;
+  const body = [cols.join(","), ...VIEW.map(r => cols.map(c => q(r[c])).join(","))].join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + body], {type: "text/csv"}));
+  a.download = `hamilton_tax_delinquent_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+}
+["q","tier","status","min","abs","oos","adv","new"].forEach(id => $(id).addEventListener("input", apply));
+document.querySelectorAll("th[data-k]").forEach(th => th.addEventListener("click", () => {
+  const k = th.dataset.k; sortDir = sortK === k ? -sortDir : (k === "score" || k === "amount_owed" ? -1 : 1); sortK = k; apply();
+}));
+$("prev").onclick = () => { page--; render(); }; $("next").onclick = () => { page++; render(); };
+$("csv").onclick = csv;
+</script>
+</body>
+</html>
