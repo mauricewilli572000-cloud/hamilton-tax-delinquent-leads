@@ -37,6 +37,7 @@ class LeadRecord:
     vacant: bool = False             # CAGIS EXLUCODE = VA
     last_sale_date: str = ""         # CAGIS SALDAT
     last_sale_amount: float | None = None
+    property_source: str = ""        # cagis | advertised | wedge
     property_lookup: str = ""        # "" | ok | none | error  (Auditor property page lookup)
     advertised_years: list[str] = field(default_factory=list)
     absentee_owner: bool = False

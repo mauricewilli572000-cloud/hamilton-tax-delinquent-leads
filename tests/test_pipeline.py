@@ -249,3 +249,30 @@ def test_cagis_csv(sandbox):
     assert v["property_address"] == "MAIN ST" and "Vacant land" in v["flags"]
     st = json.loads(config.STATE_JSON.read_text())
     assert st["cagis_snapshot"] == "2026-10-31" and st["cagis_file"] == path.name
+
+
+def test_cagis_key_variants():
+    from src.cagis import keys_for
+    # BOOK/PAGE/PARCEL columns with leading zeros of any width
+    assert keys_for({"BOOK": "0020", "PAGE": "7054", "PARCEL": "105", "MLTOWN": "0"})[0] == "0207054010500"
+    # PROPTYID with an extra leading zero (14 digits)
+    assert "0207054010500" in keys_for({"PROPTYID": "00207054010500"})
+    # PARCELID 12 digits with leading zero + no suffix
+    assert "0207054010500" in keys_for({"PARCELID": "002070540105"})
+    # multi-owner 90
+    assert keys_for({"BOOK": "32", "PAGE": "1", "PARCEL": "96", "MLTOWN": "90"})[0] == "0320001009690"
+
+
+def test_cagis_apply_clears_old_matches():
+    from src.cagis import apply
+    from src.schema import LeadRecord
+    bad = LeadRecord(doc_num="020-7054-0105-00", parcel_id="020-7054-0105-00",
+                     property_address="WRONG ST", market_value=1.0)           # touched by match v1
+    adv = LeadRecord(doc_num="002-0002-0128-00", parcel_id="002-0002-0128-00",
+                     property_address="6313 CAMBRIDGE AVE")                    # from advertised list
+    leads = {l.doc_num: l for l in (bad, adv)}
+    apply(leads, {"0207054010500": {"address": "3029 PERCY AVE", "market_value": 65920.0, "land_use": "510",
+                                    "exlucode": "SF", "foreclosure": False, "last_sale_date": "",
+                                    "last_sale_amount": None, "cagis_delinquent": None}})
+    assert bad.property_address == "3029 PERCY AVE" and bad.property_source == "cagis"
+    assert adv.property_address == "6313 CAMBRIDGE AVE" and adv.market_value is None

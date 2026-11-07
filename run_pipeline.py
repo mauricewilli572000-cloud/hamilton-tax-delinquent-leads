@@ -69,12 +69,15 @@ def load_cagis(args, leads: dict, state: dict, force: bool = False) -> dict | No
         else:
             url, sess = cagis.latest_name()
             name = url.rsplit("/", 1)[-1]
-            if not force and state.get("cagis_file") == name and state.get("cagis_snapshot") == state.get("snapshot"):
+            if (not force and state.get("cagis_file") == name and state.get("cagis_snapshot") == state.get("snapshot")
+                    and state.get("cagis_match_version") == cagis.MATCH_VERSION):
                 log.info("CAGIS parcel file unchanged (%s) - already applied.", name)
                 return None
             path = cagis.download(config.RAW_DIR, url, sess)
+        cagis.save_sample(path, config.DATA_DIR / "cagis_sample.txt")
         parcels = cagis.read_parcels(path, wanted)
         state["cagis_file"] = name
+        state["cagis_match_version"] = cagis.MATCH_VERSION
         return parcels
     except Exception as e:
         log.warning("CAGIS parcel file unavailable (%s) - property addresses not updated this run.", e)

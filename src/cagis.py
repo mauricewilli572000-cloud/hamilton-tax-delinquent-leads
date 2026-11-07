@@ -115,18 +115,61 @@ def parse_saldat(v: str) -> str:
         return ""
 
 
-def keys_for(row: dict) -> list[str]:
-    """Possible 13-digit Auditor parcel numbers for a CAGIS row."""
+MATCH_VERSION = 2   # bump when matching logic changes -> forces re-apply
+
+
+def _d(v) -> str:
+    return re.sub(r"\D", "", str(v or ""))
+
+
+def _fit13(d: str) -> list[str]:
+    """Normalise a digit string to the Auditor's 13-digit parcel number (variants)."""
     out = []
-    p = re.sub(r"\D", "", row.get("PROPTYID") or "")
-    if len(p) == 13:
-        out.append(p)
-    base = re.sub(r"\D", "", row.get("PARCELID") or row.get("NAME") or "")
-    if len(base) == 11:
-        ml = re.sub(r"\D", "", row.get("MLTOWN") or "0")
-        out.append(base + ml.zfill(2)[-2:])
-        out.append(base + "00")
+    if len(d) == 13:
+        out.append(d)
+    if len(d) == 14 and d.startswith("0"):          # CAGIS: extra leading zero
+        out.append(d[1:])
+    if len(d) in (11, 12):                          # missing the multi-owner suffix
+        base = d[1:] if (len(d) == 12 and d.startswith("0")) else d
+        if len(base) == 11:
+            out.append(base + "00")
+        if len(d) == 12:
+            out.append(d + "0")                     # single-digit MLTOWN '0'
     return out
+
+
+def keys_for(row: dict) -> list[str]:
+    """Possible 13-digit Auditor parcel numbers for a CAGIS row (most reliable first)."""
+    out: list[str] = []
+    book, page, parcel, ml = _d(row.get("BOOK")), _d(row.get("PAGE")), _d(row.get("PARCEL")), _d(row.get("MLTOWN"))
+    if book and page and parcel:
+        out.append(f"{int(book):03d}{int(page):04d}{int(parcel):04d}{int(ml or 0):02d}")
+        out.append(f"{int(book):03d}{int(page):04d}{int(parcel):04d}00")
+    for col in ("PROPTYID", "PARCELID", "NAME", "AUDPTYID"):
+        out.extend(_fit13(_d(row.get(col))))
+    seen, uniq = set(), []
+    for k in out:
+        if len(k) == 13 and k not in seen:
+            seen.add(k); uniq.append(k)
+    return uniq
+
+
+def save_sample(path: Path, dest: Path, n: int = 8) -> None:
+    """Write the ID columns of the first few rows to data/ so the format can be checked."""
+    try:
+        with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as f:
+            reader = csv.DictReader(f)
+            cols = [c for c in (reader.fieldnames or [])
+                    if c.strip().upper() in ("BOOK", "PAGE", "PARCEL", "MLTOWN", "PROPTYID", "PARCELID", "NAME",
+                                             "ADDRNO", "ADDRST", "ADDRSF", "MKTLND", "MKTIMP", "SALDAT")]
+            lines = ["columns: " + ", ".join(reader.fieldnames or []), ""]
+            for i, row in enumerate(reader):
+                if i >= n:
+                    break
+                lines.append(" | ".join(f"{c}={row.get(c)!r}" for c in cols))
+        dest.write_text("\n".join(lines), encoding="utf-8")
+    except Exception as e:
+        log.info("Could not write CAGIS sample: %s", e)
 
 
 def read_parcels(path: Path, wanted: set[str]) -> dict[str, dict]:
@@ -146,7 +189,7 @@ def read_parcels(path: Path, wanted: set[str]) -> dict[str, dict]:
             rows += 1
             keys = keys_for(row)
             hit = next((k for k in keys if k in wanted), None)
-            if hit is None and not any(k[:11] in wanted_base for k in keys):
+            if hit is None and not (keys and keys[0][:11] in wanted_base):
                 continue
             g = lambda k: (row.get(k) or "").strip()
             no, st, sf, unit = g("ADDRNO"), g("ADDRST"), g("ADDRSF"), g("UNIT")
@@ -167,19 +210,30 @@ def read_parcels(path: Path, wanted: set[str]) -> dict[str, dict]:
             if hit:
                 if hit not in out or (not out[hit]["address"] and info["address"]):
                     out[hit] = info
-            else:
-                for k in keys:
-                    by_base.setdefault(k[:11], info)
+            elif keys and row.get("BOOK") and row.get("PARCEL"):
+                # fallback only from the BOOK/PAGE/PARCEL columns (never from shifted IDs)
+                by_base.setdefault(keys[0][:11], info)
     # fallback: same book/page/parcel, different multi-owner suffix
     for w in wanted - set(out):
         if w[:11] in by_base:
             out[w] = by_base[w[:11]]
-    log.info("CAGIS CSV: %d rows read, %d of %d leads matched (%d with an address)",
-             rows, len(out), len(wanted), sum(1 for v in out.values() if v["address"]))
+    log.info("CAGIS CSV: %d rows read, %d of %d leads matched (%d with an address) [match v%d]",
+             rows, len(out), len(wanted), sum(1 for v in out.values() if v["address"]), MATCH_VERSION)
     return out
 
 
 def apply(leads: dict, parcels: dict[str, dict]) -> int:
+    # clear anything a previous CAGIS match attached (match v1 could mis-match), then re-apply
+    for lead in leads.values():
+        if lead.property_source == "cagis" or (not lead.property_source and
+                                                (lead.market_value is not None or lead.last_sale_date)):
+            lead.property_address = ""     # came from (possibly wrong) CAGIS match - refilled below
+            lead.market_value = None
+            lead.foreclosure_flag = False
+            lead.vacant = False
+            lead.last_sale_date = ""
+            lead.last_sale_amount = None
+            lead.property_source = ""
     n = 0
     for lead in leads.values():
         p = parcels.get(lead.parcel_id.replace("-", ""))
@@ -188,6 +242,7 @@ def apply(leads: dict, parcels: dict[str, dict]) -> int:
         n += 1
         if p["address"]:
             lead.property_address = p["address"]
+            lead.property_source = "cagis"
         lead.market_value = p["market_value"]
         lead.foreclosure_flag = p["foreclosure"]
         lead.vacant = p["exlucode"] == "VA"
