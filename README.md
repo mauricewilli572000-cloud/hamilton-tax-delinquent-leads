@@ -25,10 +25,21 @@ The Forfeited Land Sale PDFs are not used (sale is every other year, next in 202
    - parcels with no address go to `data/pending_records.json` and are retried each run
    - safety stop: if a new file parses to < 30% of the current active leads, it aborts instead of mass-marking leads removed
 6. Scores 0–100 → Hot (55+) / Warm (32+) / Cold. Points for amount owed, advertised-delinquent (more for multiple years), delinquent 3+ years, absentee owner, out-of-state owner, estate/heirs, residential land use; minus for LLC/corporate owners.
-7. Writes `data/ghl_hamilton_tax_delinquent.csv` (GoHighLevel import, active leads only) and `docs/hamilton_tax_delinquent.json` (dashboard).
+7. **Property address lookup.** `unpaid.xlsx` only has the owner's *mailing* address
+   (`owner_address_1` / `owner_address_2`). The property's own address comes from the
+   Auditor property page (`wedge.hcauditor.org/view/re/{parcel}/{year}/summary`), up to
+   4,000 per run, highest-scoring leads first, saved to `data/property_cache.json` so each
+   parcel is looked up only once. On days the county file is unchanged, the run still
+   continues these lookups until they're all done. Advertised files also supply a street
+   address when their legal description starts with a house number.
+8. Writes `data/ghl_hamilton_tax_delinquent.csv` (GoHighLevel import, active leads only) and `docs/hamilton_tax_delinquent.json` (dashboard).
 
-## ⚠️ First step: confirm the columns (one time)
-The county site blocks cloud sandboxes, so the parser was built against test files with likely layouts. Run this once on your PC:
+## Column check
+Confirmed against the real files on 2026-11-06:
+- `unpaid.xlsx`: parcel_number, owner_name_1, owner_name_2, owner_address_1, owner_address_2, property_class, unpaid_amount, contract_yn, tax_district
+- `Advertised*.xlsx`: owner_name, property_description, property_number, assessed_value, delinquent amount, year
+
+If the county changes the layout later, run:
 
 ```powershell
 cd hamilton-tax-delinquent-leads

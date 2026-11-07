@@ -84,6 +84,13 @@ def split_mailing(lines: list[str]) -> tuple[str, str, str, str]:
     return street, city, state, zipc
 
 
+def _cell_raw(row: list, idxs: list[int] | None) -> str:
+    """Like _cell but keeps internal spacing (used for legal descriptions)."""
+    if not idxs or idxs[0] >= len(row) or row[idxs[0]] is None:
+        return ""
+    return str(row[idxs[0]]).strip()
+
+
 def _cell(row: list, idxs: list[int] | None) -> str:
     if not idxs:
         return ""
@@ -146,6 +153,13 @@ def parse_file(path: Path, overrides: dict[str, str] | None = None, source_url: 
                 _cell(row, mapping.get("prop_street")),
                 _cell(row, mapping.get("prop_suffix")),
             ) if x and x != "0")
+        if not prop and "prop_description" in mapping:
+            # legal description often starts with the street address:
+            # '6313 CAMBRIDGE AVE       216.46 X 526.34 IRR ...'
+            first = re.split(r"\s{2,}", _cell_raw(row, mapping["prop_description"]))[0]
+            m = re.match(r"^(\d+[A-Z]?(?:-\d+)?\s+[A-Z0-9 .'-]+?)(?:\s+\d+(?:\.\d+)?\s*X\b.*)?$", first.upper())
+            if m:
+                prop = m.group(1).strip()
         pzip = _cell(row, mapping.get("prop_zip"))
         pzm = ZIP_RE.search(pzip)
 
@@ -172,6 +186,7 @@ def parse_file(path: Path, overrides: dict[str, str] | None = None, source_url: 
             "tax_year": _cell(row, mapping.get("tax_year")),
             "certified_date": _cell(row, mapping.get("certified_date")),
             "land_use": _cell(row, mapping.get("land_use")),
+            "on_contract": _cell(row, mapping.get("contract")).upper() in ("Y", "YES", "TRUE", "1"),
             "source_url": source_url,
         })
     # one row per parcel: some files list a row per tax year -> sum amounts

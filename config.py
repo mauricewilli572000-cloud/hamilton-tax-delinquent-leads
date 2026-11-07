@@ -28,8 +28,18 @@ ADVERTISED_FALLBACK_URLS = [
 # their score. Older lists add little.
 ADVERTISED_YEARS_BACK = 4
 
-# Auditor property page for each parcel (shown as a link on the dashboard)
-AUDITOR_PARCEL_URL = "https://wedge1.hcauditor.org/view/re/{parcel_digits}/{year}/summary"
+# Auditor property page for each parcel: dashboard link + property address lookup.
+# {year} is the tax year, e.g. 2025 for "2025 Payable 2026".
+WEDGE_URL = "https://wedge.hcauditor.org/view/re/{parcel_digits}/{year}/summary"
+AUDITOR_PARCEL_URL = WEDGE_URL
+
+# Property address lookups (unpaid.xlsx has only the owner's MAILING address).
+# Cached forever in data/property_cache.json; each run does up to this many,
+# highest-score leads first, so a big first batch fills in over a few days.
+ENRICH_MAX_PER_RUN = 4000
+ENRICH_TIME_BUDGET_SEC = 35 * 60
+ENRICH_WORKERS = 3
+ENRICH_DELAY = 0.25           # seconds between requests submitted
 
 HTTP_HEADERS = {
     "User-Agent": (
@@ -78,5 +88,6 @@ DOCS_DIR = ROOT / "docs"
 RECORDS_JSON = DATA_DIR / "records.json"
 PENDING_JSON = DATA_DIR / "pending_records.json"   # leads missing an address
 STATE_JSON = DATA_DIR / "state.json"
+PROPERTY_CACHE_JSON = DATA_DIR / "property_cache.json"
 GHL_CSV = DATA_DIR / "ghl_hamilton_tax_delinquent.csv"
 DASHBOARD_JSON = DOCS_DIR / "hamilton_tax_delinquent.json"

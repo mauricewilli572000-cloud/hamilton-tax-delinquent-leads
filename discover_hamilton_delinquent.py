@@ -32,7 +32,7 @@ def show(path: Path) -> None:
     wb = load_workbook(path, read_only=True, data_only=True)
     for ws in wb.worksheets:
         rows = [list(r) for r in ws.iter_rows(values_only=True, max_row=14)]
-        print(f"\n--- sheet '{ws.title}'  dims={ws.dimensions}")
+        print(f"\n--- sheet '{ws.title}'")
         for i, r in enumerate(rows):
             print(f"  row{i:02d}: {r}")
     wb.close()

@@ -65,7 +65,7 @@ ADVERTISED = [
 
 @pytest.fixture
 def sandbox(tmp_path, monkeypatch):
-    for name in ("RECORDS_JSON", "PENDING_JSON", "STATE_JSON", "GHL_CSV", "DASHBOARD_JSON"):
+    for name in ("RECORDS_JSON", "PENDING_JSON", "STATE_JSON", "GHL_CSV", "DASHBOARD_JSON", "PROPERTY_CACHE_JSON"):
         monkeypatch.setattr(config, name, tmp_path / Path(getattr(config, name)).name)
     monkeypatch.setattr(config, "MIN_AMOUNT_OWED", 250.0)
     return tmp_path
@@ -94,7 +94,7 @@ def test_full_pipeline_two_runs(sandbox):
     unpaid = make_xlsx(sandbox / "unpaid.xlsx", UNPAID_A)
     adv = make_xlsx(sandbox / "AdvertisedDelinquentFile2025.xlsx", ADVERTISED)
     assert run_pipeline.main(["--local-unpaid", str(unpaid), "--local-advertised", str(adv),
-                              "--as-of", "2026-10-31"]) == 0
+                              "--as-of", "2026-10-31", "--no-enrich"]) == 0
 
     data = json.loads(config.RECORDS_JSON.read_text())
     recs = {r["doc_num"]: r for r in data["records"]}
@@ -115,11 +115,88 @@ def test_full_pipeline_two_runs(sandbox):
     rows2 = [r for r in UNPAID_A if not (r and r[0] == "247-0001-0003-00")]
     rows2 = [r if not (r and r[0] == "073-0003-0193-00") else r[:8] + [1500, 1800] for r in rows2]
     unpaid2 = make_xlsx(sandbox / "unpaid2.xlsx", rows2)
-    assert run_pipeline.main(["--local-unpaid", str(unpaid2), "--as-of", "2026-11-30"]) == 0
+    assert run_pipeline.main(["--local-unpaid", str(unpaid2), "--as-of", "2026-11-30", "--no-enrich"]) == 0
     recs = {r["doc_num"]: r for r in json.loads(config.RECORDS_JSON.read_text())["records"]}
     assert recs["247-0001-0003-00"]["status"] == "removed"
     assert recs["247-0001-0003-00"]["removed_date"] == "2026-11-30"
     assert [h["amount"] for h in recs["073-0003-0193-00"]["amount_history"]] == [1210.0, 1800.0]
 
     # unchanged file -> no-op
-    assert run_pipeline.main(["--local-unpaid", str(unpaid2)]) == 0
+    assert run_pipeline.main(["--local-unpaid", str(unpaid2), "--no-enrich"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# REAL layouts, copied from discover_output.txt (2026-11-06)
+# ---------------------------------------------------------------------------
+REAL_UNPAID = [
+    ["parcel_number", "owner_name_1", "owner_name_2", "owner_address_1", "owner_address_2", "property_class",
+     "unpaid_amount", "contract_yn", "tax_district"],
+    ["0010002031600", "CHELSEA MOORE INC", None, "5531 FIRETHORN CT ", "CINCINNATI,OH  45242", 400, 0.91, "N", "001"],
+    ["0010004008700", "SCHMIDT WILLIAM A", "& PAULA", "6587 RIPPLEWOOD LN ", "CINCINNATI,OH  452301469", 510, 5543.79, "N", "001"],
+    ["0010004026300", "BASHIR SAAD &", "KAISERA SAAD BASHIR", "6596 SPINDLEWICK LN ", "CINCINNATI,OH  452302433", 510, 3428, "Y", "001"],
+    ["0020002012800", "EVANS JEFFREY & JENNIFER", None, "PO BOX 9", "MASON,OH  45040", 510, 3713.39, "N", "001"],
+    ["0060001001400", "FARES J RADEL", "FUNERAL HOMES INC", "822 YORK ST ", "NEWPORT,KY  41071", 441, 809.19, "N", "001"],
+    ["2180057010600", "TI REAL ESTATE SERVICES LLC", None, "1 MAIN ST", "CINCINNATI,OH  45202", 500, 17921.39, "N", "001"],
+]
+REAL_ADV = [
+    ["owner_name", "property_description", "property_number", "assessed_value", "delinquent amount", "year",
+     None, None, None, None],
+    ["EVANS JEFFREY & JENNIFER", "6313 CAMBRIDGE AVE       216.46 X 526.34 IRR      PT LOT 12 J GERRARDS SUB",
+     "0020002012800", 317950, 3713.39, 2024, None, None, None, None],
+    ["ARIF NARGIS", "RAINBOW LN 54 X 170.51   IRR LOT 63 RAINBOW HILL  SUB SEC B-2", "0010001023600",
+     165430, 2011.94, 2024, None, None, None, None],
+]
+
+
+def test_real_unpaid_layout(tmp_path):
+    rows = {r["parcel_id"]: r for r in parse_file(make_xlsx(tmp_path / "unpaid.xlsx", REAL_UNPAID))}
+    s = rows["001-0004-0087-00"]
+    assert (s["mailing_address"], s["mailing_city"], s["mailing_state"], s["mailing_zip"]) == \
+        ("6587 RIPPLEWOOD LN", "CINCINNATI", "OH", "45230")
+    assert s["owner_name_2"] == "& PAULA" and s["amount_owed"] == 5543.79 and s["land_use"] == "510"
+    assert rows["001-0004-0263-00"]["on_contract"] is True
+    assert rows["006-0001-0014-00"]["mailing_state"] == "KY"
+    assert rows["002-0002-0128-00"]["mailing_address"] == "PO BOX 9"
+
+
+def test_real_advertised_layout(tmp_path):
+    rows = {r["parcel_id"]: r for r in parse_file(make_xlsx(tmp_path / "AdvertisedDelinquentFile2025.xlsx", REAL_ADV))}
+    assert rows["002-0002-0128-00"]["property_address"] == "6313 CAMBRIDGE AVE"
+    assert rows["001-0001-0236-00"]["property_address"] == ""          # no house number -> leave blank
+    assert rows["002-0002-0128-00"]["tax_year"] == "2024"
+
+
+def test_real_pipeline(sandbox):
+    unpaid = make_xlsx(sandbox / "unpaid.xlsx", REAL_UNPAID)
+    adv = make_xlsx(sandbox / "AdvertisedDelinquentFile2025.xlsx", REAL_ADV)
+    # pre-seed the property cache so no network is needed
+    config.PROPERTY_CACHE_JSON.write_text(json.dumps({
+        "0010004008700": {"status": "ok", "address": "6587 RIPPLEWOOD LN", "date": "2026-11-06"},
+    }))
+    assert run_pipeline.main(["--local-unpaid", str(unpaid), "--local-advertised", str(adv),
+                              "--as-of", "2026-10-31", "--no-enrich"]) == 0
+    recs = {r["doc_num"]: r for r in json.loads(config.RECORDS_JSON.read_text())["records"]}
+    assert "001-0002-0316-00" not in recs                     # $0.91 filtered
+    assert len(recs) == 5                                      # all have a mailing address now
+    s = recs["001-0004-0087-00"]
+    assert s["property_address"] == "6587 RIPPLEWOOD LN" and s["property_zip"] == "45230"
+    assert s["absentee_owner"] is False
+    e = recs["002-0002-0128-00"]
+    assert e["advertised_years"] == ["2025"] and e["property_address"] == "6313 CAMBRIDGE AVE"
+    assert e["absentee_owner"] is True
+    assert "Estate / heirs" not in recs["218-0057-0106-00"]["flags"]
+    assert "On payment plan" in recs["001-0004-0263-00"]["flags"]
+    assert "Out of state (KY)" in recs["006-0001-0014-00"]["flags"]
+    assert recs["001-0004-0087-00"]["auditor_url"].startswith("https://wedge.hcauditor.org/view/re/0010004008700/")
+
+
+def test_parse_wedge_header():
+    from src.enrich import parse_address
+    html = """<html><head><script>var x='Address foo';</script></head><body>
+      <div class="parcel"><span>Parcel ID</span><span>206-0009-0053-00</span>
+      <span>Address</span><span>2280 HARRISON AVE</span><span>Index Order</span><span>Parcel Number</span></div>
+      <div>Tax Bill Mail Address</div><div>3 E FOURTH ST</div></body></html>"""
+    assert parse_address(html) == "2280 HARRISON AVE"
+    doubled = "Parcel ID 247-0001-0003-00 247-0001-0003-00 Address 6436 HAMILTON AVE 6436 HAMILTON AVE Index Order"
+    assert parse_address(doubled) == "6436 HAMILTON AVE"
+    assert parse_address("<p>nothing here</p>") == ""

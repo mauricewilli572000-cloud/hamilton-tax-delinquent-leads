@@ -31,6 +31,8 @@ class LeadRecord:
     delinquent_amount: float | None = None
     tax_year: str = ""
     land_use: str = ""
+    on_contract: bool = False        # contract_yn = Y -> on a delinquent payment plan
+    property_lookup: str = ""        # "" | ok | none | error  (Auditor property page lookup)
     advertised_years: list[str] = field(default_factory=list)
     absentee_owner: bool = False
     out_of_state: bool = False

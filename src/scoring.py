@@ -6,7 +6,8 @@ import re
 
 from .schema import LeadRecord
 
-ESTATE_RE = re.compile(r"\b(ESTATE|EST OF|HEIRS|DECEASED|DECD|UNKNOWN HEIRS|SURVIVING)\b")
+# "(?<!REAL )" so "TI REAL ESTATE SERVICES LLC" is not treated as a deceased owner's estate
+ESTATE_RE = re.compile(r"(?<!REAL )\b(ESTATE|EST OF|HEIRS|DECEASED|DECD|UNKNOWN HEIRS|SURVIVING)\b")
 TRUST_RE = re.compile(r"\b(TRUST|TRUSTEE|TR)\b")
 BUSINESS_RE = re.compile(r"\b(LLC|L L C|INC|CORP|CORPORATION|COMPANY|CO|LTD|LP|LLP|PARTNERSHIP|BANK|ASSOCIATION|ASSN|CHURCH|MINISTRIES)\b")
 RESIDENTIAL_CODES = re.compile(r"^5\d\d$")   # Ohio land-use 500-599 = residential
@@ -61,6 +62,9 @@ def score(lead: LeadRecord) -> LeadRecord:
         pts += 4; flags.append("Trust")
     if BUSINESS_RE.search(owner):
         pts -= 6; flags.append("Business owner")
+
+    if lead.on_contract:
+        pts -= 8; flags.append("On payment plan")
 
     code = re.sub(r"\D", "", lead.land_use)[:3]
     if code and RESIDENTIAL_CODES.match(code):

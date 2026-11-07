@@ -18,7 +18,8 @@ import re
 FIELD_RULES: dict[str, list[tuple[str, str]]] = {
     "parcel": [
         ("eq", "parcel"), ("eq", "parcelid"), ("eq", "parcelnumber"), ("eq", "parcelno"),
-        ("eq", "parcelnum"), ("eq", "ppn"), ("eq", "pin"), ("in", "parcel"),
+        ("eq", "parcelnum"), ("eq", "ppn"), ("eq", "pin"), ("eq", "propertynumber"),
+        ("in", "parcel"), ("in", "propertynumber"),
     ],
     "owner_name_2": [
         ("eq", "owner2"), ("eq", "ownername2"), ("eq", "name2"), ("eq", "owner2name"),
@@ -42,6 +43,7 @@ FIELD_RULES: dict[str, list[tuple[str, str]]] = {
                  ("in", "billzip")],
     # mailing street lines - may be several (Mail Addr 1/2/3) -> collected in order
     "mail_line": [
+        ("in", "owneraddress"), ("in", "owneraddr"),
         ("in", "mailingaddress"), ("in", "mailaddress"), ("in", "mailaddr"), ("in", "mailline"),
         ("in", "billingaddress"), ("in", "billaddr"), ("in", "taxbill"), ("in", "mailing"),
         ("eq", "mailname"),
@@ -57,6 +59,7 @@ FIELD_RULES: dict[str, list[tuple[str, str]]] = {
         ("in", "situs"), ("in", "siteaddress"), ("in", "propaddr"), ("eq", "location"),
         ("eq", "address"), ("eq", "propertyaddr"),
     ],
+    "prop_description": [("in", "propertydescription"), ("in", "legaldescription"), ("eq", "description")],
     "prop_city": [("in", "propertycity"), ("in", "locationcity"), ("in", "situscity"),
                   ("eq", "city"), ("in", "municipality"), ("eq", "taxdistrictname")],
     "prop_zip": [("in", "propertyzip"), ("in", "locationzip"), ("in", "situszip"), ("eq", "zip"),
@@ -78,6 +81,7 @@ FIELD_RULES: dict[str, list[tuple[str, str]]] = {
                  ("eq", "taxyear"), ("eq", "year"), ("in", "taxyear"), ("in", "delqyear")],
     "certified_date": [("in", "certifieddate"), ("in", "certdate"), ("in", "delinquentdate"),
                        ("in", "advertiseddate")],
+    "contract": [("in", "contractyn"), ("in", "contract"), ("in", "paymentplan")],
     "land_use": [("eq", "landuse"), ("eq", "landusecode"), ("eq", "class"), ("eq", "propertyclass"),
                  ("in", "landuse"), ("in", "usecode"), ("in", "propertyclass")],
 }
@@ -86,8 +90,8 @@ FIELD_RULES: dict[str, list[tuple[str, str]]] = {
 CLAIM_ORDER = [
     "parcel", "owner_name_2", "owner_name",
     "mail_city_state_zip", "mail_city", "mail_state", "mail_zip", "mail_line",
-    "prop_house_no", "prop_street", "prop_suffix", "prop_address", "prop_city", "prop_zip",
-    "delinquent_amount", "tax_year", "certified_date", "amount_owed", "land_use",
+    "prop_house_no", "prop_street", "prop_suffix", "prop_address", "prop_description", "prop_city", "prop_zip",
+    "delinquent_amount", "tax_year", "certified_date", "amount_owed", "contract", "land_use",
 ]
 MULTI_FIELDS = {"mail_line"}  # may map to several columns
 

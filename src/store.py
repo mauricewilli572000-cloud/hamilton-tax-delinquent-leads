@@ -81,7 +81,7 @@ def export_dashboard(path: Path, leads: dict[str, LeadRecord], meta: dict) -> No
     """Compact JSON for the GitHub Pages dashboard (active leads + recently removed)."""
     keep = ("doc_num", "owner_name", "owner_name_2", "mailing_address", "mailing_city", "mailing_state",
             "mailing_zip", "property_address", "property_city", "property_zip", "amount_owed",
-            "delinquent_amount", "tax_year", "advertised_years", "absentee_owner", "flags", "score",
+            "delinquent_amount", "tax_year", "advertised_years", "absentee_owner", "on_contract", "flags", "score",
             "tier", "auditor_url", "date_added", "last_seen", "status", "removed_date")
     rows = [
         {k: getattr(l, k) for k in keep}
